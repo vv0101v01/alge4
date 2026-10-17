@@ -895,3 +895,226 @@ pub fn ClosureQuantale::order_homology_betti(
 ) -> Array[Int32] {
   self.order_complex(proper_only).betti()
 }
+
+// ---------------- 跨庫擴展（整合 alge / alge1 / alge2）：Topos 模態、餘切嵌入維數與 Alexandrov 同倫核 ----------------
+
+///|
+/// Topos 內部 Heyting 蘊涵 `(b ⇒ a)`：在殘差量化格中即右殘差 `residual(a, b) = (a : b)`
+/// （整合 `alge1/topos::omega_implies` 與 `alge2/vect_top_topos::heyting_implies`）。
+pub fn ClosureQuantale::heyting_implication(
+  self : ClosureQuantale,
+  b : Int32,
+  a : Int32,
+) -> Int32 {
+  self.residual(a, b)
+}
+
+///|
+/// Topos 內部偽補否定 `¬a = (a ⇒ ⊥) = (⊥ : a)`（在理想格中即零化子 `Ann(a)`）。
+pub fn ClosureQuantale::heyting_negation(
+  self : ClosureQuantale,
+  a : Int32,
+) -> Int32 {
+  self.residual(self.bot(), a)
+}
+
+///|
+/// Lawvere–Tierney 左精確雙重否定稠密模態 `○_{¬¬}(a) = ¬¬a = (⊥ : (⊥ : a))`
+/// （整合 `alge1/topos::sheafify` 與 `alge2/vect_top_topos::lawvere_tierney_dense`）。
+pub fn ClosureQuantale::lawvere_tierney_dense(
+  self : ClosureQuantale,
+  a : Int32,
+) -> Int32 {
+  self.heyting_negation(self.heyting_negation(a))
+}
+
+///|
+/// Kripke–Joyal 語義強制判定 `stage_p ⊩ formula_a` ⟺ `stage_p ≼ formula_a`
+/// （整合 `alge1/topos::mitchell_benabou_eval` 與 `alge2/vect_top_topos::kripke_joyal_forces`）。
+pub fn ClosureQuantale::kripke_joyal_forces(
+  self : ClosureQuantale,
+  stage_p : Int32,
+  formula_a : Int32,
+) -> Bool {
+  self.is_le(stage_p, formula_a)
+}
+
+///|
+/// 判定量化格是否為局部格（具唯一餘原子／唯一極大理想 `m`，整合 `alge/quot::is_local`）。
+pub fn ClosureQuantale::is_local_quantale(self : ClosureQuantale) -> Bool {
+  self.coatoms().length() == 1
+}
+
+///|
+/// 計算局部阿廷環理想格在素數特徵 `p` 下的 Zariski 餘切空間嵌入維數
+/// `edim(R) = dim_{𝔽_p}(m / m²) = log_p(|m| / |m²|)`（整合 `alge/quot::edim` 與 `alge/ga::Tables::edim`）。
+pub fn ClosureQuantale::embedding_dimension(
+  self : ClosureQuantale,
+  p : Int32,
+) -> Int32 {
+  let cs = self.coatoms()
+  if cs.length() != 1 || p <= 1 {
+    return 0
+  }
+  let m = cs[0]
+  let m2 = self.mul(m, m)
+  let wm = self.closed[m].weight()
+  let wm2 = self.closed[m2].weight()
+  if wm2 <= 0 || wm <= wm2 {
+    return 0
+  }
+  let mut ratio = wm / wm2
+  let mut edim = 0
+  while ratio > 1 {
+    ratio = ratio / p
+    edim = edim + 1
+  }
+  edim
+}
+
+///|
+/// 正則局部環判準（Auslander–Buchsbaum–Serre / `alge/quot` 定理 T4）：
+/// 局部環 `R` 為正則局部環 ⟺ `edim(R) == krull_dimension(R)`（對零維局部阿廷環即 `edim == 0`，亦即 `R` 為體）。
+pub fn ClosureQuantale::is_regular_local(
+  self : ClosureQuantale,
+  p : Int32,
+) -> Bool {
+  self.is_local_quantale() &&
+  self.embedding_dimension(p) == self.krull_dimension()
+}
+
+///|
+/// 輔助函數：檢查嚴格錐遮罩 `strict_cone` 在偏序集是否存在唯一錐頂點（Beat Apex）。
+fn quantale_has_cone_apex(
+  k : Int32,
+  strict_cone : UInt64,
+  cones : Array[UInt64],
+) -> Bool {
+  if strict_cone == 0UL {
+    return false
+  }
+  for y in 0..<k {
+    let y_bit = 1UL << y
+    if (strict_cone & y_bit) != 0UL && (strict_cone & cones[y]) == strict_cone {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Stong–Quillen Alexandrov 偏序集可縮纖維（Up-Beat / Down-Beat Points）位並行強形變收縮
+/// （整合 `alge1/topos::contractible_reduction` 與 `alge2/vect_top_topos::AlexandrovSpace::homotopy_core_mask`）：
+/// 對格 `L`（或真部 `L \ {⊥, ⊤}`）迭代消去所有具唯一上錐頂或唯一下錐頂的可縮節點，
+/// 返回同倫極小核（Homotopy Core）的 64-bit 存活位元遮罩。
+pub fn ClosureQuantale::alexandrov_homotopy_core_mask(
+  self : ClosureQuantale,
+  proper_only : Bool,
+) -> UInt64 {
+  let m = self.size()
+  let nodes : Array[Int32] = []
+  for i in 0..<m {
+    if proper_only && (i == self.bot() || i == self.top()) {
+      continue
+    }
+    nodes.push(i)
+  }
+  let k = nodes.length()
+  if k <= 0 || k > 62 {
+    return 0UL
+  }
+  let upset = Array::make(k, 0UL)
+  let downset = Array::make(k, 0UL)
+  for u in 0..<k {
+    for v in 0..<k {
+      if self.is_le(nodes[u], nodes[v]) {
+        upset[u] = upset[u] | (1UL << v)
+        downset[v] = downset[v] | (1UL << u)
+      }
+    }
+  }
+  let mut active = (1UL << k) - 1UL
+  let mut changed = true
+  while changed {
+    changed = false
+    for x in 0..<k {
+      let x_bit = 1UL << x
+      if (active & x_bit) != 0UL {
+        let not_x = x_bit.lnot()
+        let strict_up = upset[x] & active & not_x
+        let strict_down = downset[x] & active & not_x
+        let is_beat = quantale_has_cone_apex(k, strict_up, upset) ||
+          quantale_has_cone_apex(k, strict_down, downset)
+        if is_beat {
+          active = active & not_x
+          changed = true
+        }
+      }
+    }
+  }
+  active
+}
+
+///|
+/// Rota–Leinster 偏序集莫比烏斯反演歐拉示性數 `χ_Möbius = ∑_{x ≼ y} μ(x, y)`
+/// （整合 `alge2/vect_top_topos::euler_characteristic_on_mask`）：
+/// 定理（Rota–Quillen）：對任意有限偏序集（及其 Beat 收縮同倫核），莫比烏斯反演歐拉示性數
+/// 恆等於其 Folkman–Quillen 階複形單純同調的歐拉示性數 `order_complex(proper_only).euler()`！
+pub fn ClosureQuantale::mobius_euler_characteristic(
+  self : ClosureQuantale,
+  proper_only : Bool,
+  use_homotopy_core : Bool,
+) -> Int32 {
+  let m = self.size()
+  let nodes : Array[Int32] = []
+  for i in 0..<m {
+    if proper_only && (i == self.bot() || i == self.top()) {
+      continue
+    }
+    nodes.push(i)
+  }
+  let k = nodes.length()
+  if k <= 0 || k > 62 {
+    return 0
+  }
+  let mask = if use_homotopy_core {
+    self.alexandrov_homotopy_core_mask(proper_only)
+  } else {
+    (1UL << k) - 1UL
+  }
+  let mu = Array::make(k * k, 0)
+  for i in 0..<k {
+    if (mask & (1UL << i)) != 0UL {
+      mu[i * k + i] = 1
+    }
+  }
+  for x in 0..<k {
+    if (mask & (1UL << x)) == 0UL {
+      continue
+    }
+    for y in (x + 1)..<k {
+      if (mask & (1UL << y)) != 0UL && self.is_le(nodes[x], nodes[y]) {
+        let mut s = 0
+        for z in x..<y {
+          if (mask & (1UL << z)) != 0UL &&
+            self.is_le(nodes[x], nodes[z]) &&
+            self.is_le(nodes[z], nodes[y]) {
+            s = s + mu[x * k + z]
+          }
+        }
+        mu[x * k + y] = -s
+      }
+    }
+  }
+  let mut chi = 0
+  for x in 0..<k {
+    if (mask & (1UL << x)) != 0UL {
+      for y in x..<k {
+        if (mask & (1UL << y)) != 0UL && self.is_le(nodes[x], nodes[y]) {
+          chi = chi + mu[x * k + y]
+        }
+      }
+    }
+  }
+  chi
+}
