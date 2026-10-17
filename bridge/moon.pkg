@@ -1,0 +1,17 @@
+pkgtype(kind: "library")
+
+import {
+  "moon-algebra" @poly,
+  "moon-algebra/num",
+  "moon-algebra/linalg",
+  "moon-algebra/finite",
+  "moon-algebra/modules",
+  "moon-algebra/geometry",
+  "moon-algebra/scheme",
+  "moon-algebra/hott",
+  "moon-algebra/core",
+  "moon-algebra/homotopy",
+  "moon-algebra/algebra",
+  "moon-algebra/derived",
+  "moon-algebra/cubical",
+}

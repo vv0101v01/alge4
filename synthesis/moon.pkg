@@ -1,0 +1,17 @@
+import {
+  "moonbitlang/core/builtin",
+  "moon-algebra/num",
+  "moon-algebra/linalg",
+  "moon-algebra/finite",
+  "moon-algebra/modules",
+  "moon-algebra/scheme",
+  "moon-algebra/hott",
+  "moon-algebra/core",
+  "moon-algebra/homotopy",
+  "moon-algebra/cubical",
+}
+
+import {
+  "moon-algebra" @poly,
+  "moonbitlang/core/quickcheck",
+} for "wbtest"

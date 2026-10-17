@@ -1,0 +1,10 @@
+pkgtype(kind: "executable")
+
+import {
+  "moon-algebra/core",
+  "moon-algebra/homotopy",
+  "moon-algebra/algebra",
+  "moon-algebra/derived",
+  "moon-algebra/cubical",
+  "moonbitlang/core/bench" @cbench,
+}
