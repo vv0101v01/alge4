@@ -263,7 +263,423 @@ pub fn BitParallelSDR::kadeishvili_transfer_to_ainf(
   ainf
 }
 
+///|
+/// 在 `𝔽_2` 上對 `n × n` 位並行矩陣 `m : @core.BoolMat` 執行 Gauss–Jordan 消去求逆矩陣 `m^{-1}`。
+pub fn boolmat_inverse_f2(m : @core.BoolMat) -> @core.BoolMat? {
+  let n = m.nrows()
+  if n != m.ncols {
+    return None
+  }
+  let a = @core.BoolMat::zero(n, n)
+  let inv = boolmat_id(n)
+  for r in 0..<n {
+    a.rows[r].xor_inplace(m.rows[r])
+  }
+  for col in 0..<n {
+    let mut piv = -1
+    for r in col..<n {
+      if a.get(r, col) {
+        piv = r
+        break
+      }
+    }
+    if piv < 0 {
+      return None
+    }
+    if piv != col {
+      let tmp_a = a.rows[col]
+      a.rows[col] = a.rows[piv]
+      a.rows[piv] = tmp_a
+      let tmp_i = inv.rows[col]
+      inv.rows[col] = inv.rows[piv]
+      inv.rows[piv] = tmp_i
+    }
+    for r in 0..<n {
+      if r != col && a.get(r, col) {
+        a.rows[r].xor_inplace(a.rows[col])
+        inv.rows[r].xor_inplace(inv.rows[col])
+      }
+    }
+  }
+  Some(inv)
+}
+
+///|
+/// 在 `𝔽_2` 上以 Gauss–Jordan 行簡化階梯形（RREF）計算位並行矩陣 `m : @core.BoolMat` 的核空間基底 `ker(m)`。
+pub fn boolmat_kernel_basis_f2(m : @core.BoolMat) -> Array[@core.Bits] {
+  let rows = m.nrows()
+  let cols = m.ncols
+  let a = @core.BoolMat::zero(rows, cols)
+  for r in 0..<rows {
+    a.rows[r].xor_inplace(m.rows[r])
+  }
+  let piv_cols : Array[Int32] = []
+  let is_piv = Array::make(cols, false)
+  let mut r = 0
+  for c in 0..<cols {
+    if r >= rows {
+      break
+    }
+    let mut piv = -1
+    for i in r..<rows {
+      if a.get(i, c) {
+        piv = i
+        break
+      }
+    }
+    if piv < 0 {
+      continue
+    }
+    if piv != r {
+      let tmp = a.rows[r]
+      a.rows[r] = a.rows[piv]
+      a.rows[piv] = tmp
+    }
+    for i in 0..<rows {
+      if i != r && a.get(i, c) {
+        a.rows[i].xor_inplace(a.rows[r])
+      }
+    }
+    piv_cols.push(c)
+    is_piv[c] = true
+    r = r + 1
+  }
+  let ker : Array[@core.Bits] = []
+  for f in 0..<cols {
+    if is_piv[f] {
+      continue
+    }
+    let v = @core.Bits::new(cols)
+    v.set(f)
+    for idx in 0..<piv_cols.length() {
+      if a.get(idx, f) {
+        v.set(piv_cols[idx])
+      }
+    }
+    ker.push(v)
+  }
+  ker
+}
+
+///|
+/// 輔助：判定候選向量 `cand` 是否與基底列表 `basis` 線性無關；若是則將其正規化加入消去表並返回 `true`。
+fn f2_try_extend_basis(
+  echelon_vecs : Array[@core.Bits],
+  echelon_pivs : Array[Int32],
+  cand : @core.Bits,
+  n : Int32,
+) -> Bool {
+  let v = cand.copy()
+  for i in 0..<echelon_vecs.length() {
+    let p = echelon_pivs[i]
+    if v.get(p) {
+      v.xor_inplace(echelon_vecs[i])
+    }
+  }
+  match v.first_set() {
+    None => false
+    Some(piv) => {
+      if piv >= n {
+        return false
+      }
+      for i in 0..<echelon_vecs.length() {
+        if echelon_vecs[i].get(piv) {
+          echelon_vecs[i].xor_inplace(v)
+        }
+      }
+      echelon_vecs.push(v)
+      echelon_pivs.push(piv)
+      true
+    }
+  }
+}
+
+///|
+/// 由任意滿足 `d_V² = 0 (mod 2)` 的 `n × n` 微分矩陣 `d_v : @core.BoolMat` 自動合成強形變收縮（Automatic Bit-Parallel SDR Synthesizer）：
+/// 演算法（`𝔽_2` Hodge—高斯分解 `V = H ⊕ B ⊕ C`）：
+///   1. 驗證 `d_V · d_V == 0`；
+///   2. 掃描 `d_V` 的各欄 `d_V(e_j)`，提取線性無關的邊界基底 `B = span{b_k = d_V(e_{c_k})}_{k=0..<r}` 與鏈補空間 `C = span{e_{c_k}}`；
+///   3. 對 `d_V` 執行行消去求出閉鏈核空間 `Z = ker(d_V)` 的基底，並將 `B` 擴充為 `Z = B ⊕ H`（其中 `H = span{z_0, ..., z_{dim_h-1}}`，`dim_h = n - 2r`）；
+///   4. 構造基底變換矩陣 `P = [H | B | C] ∈ GL_n(𝔽_2)` 及其逆矩陣 `Q = P^{-1}`：
+///      - 嵌入 `i : H ↪ V` 取 `P` 的前 `dim_h` 欄；
+///      - 投影 `p : V ↠ H` 取 `Q` 的前 `dim_h` 列；
+///      - 收縮同倫 `h : V -> V` 將 `B` 座標 `b_k` 映至對應的鏈生成元 `e_{c_k} ∈ C`，並在 `H ⊕ C` 上為 `0`；
+///   5. 定理：如此自動合成之 `(V, d_V, H, d_H = 0, i, p, h)` 恆滿足全部 7 條 SDR 公理（含邊條件 `h² = 0, p h = 0, h i = 0`）！
+pub fn BitParallelSDR::synthesize_from_differential(
+  d_v : @core.BoolMat,
+) -> BitParallelSDR? {
+  let n = d_v.nrows()
+  if n != d_v.ncols ||
+    !boolmat_eq(d_v.mul(d_v), @core.BoolMat::zero(n, n)) {
+    return None
+  }
+  // 提取 d_V 的各欄 col_vecs[j] = d_V(e_j)
+  let col_vecs : Array[@core.Bits] = []
+  for j in 0..<n {
+    let col = @core.Bits::new(n)
+    for i in 0..<n {
+      if d_v.get(i, j) {
+        col.set(i)
+      }
+    }
+    col_vecs.push(col)
+  }
+  let ech_vecs : Array[@core.Bits] = []
+  let ech_pivs : Array[Int32] = []
+  let b_basis : Array[@core.Bits] = []
+  let c_indices : Array[Int32] = []
+  for j in 0..<n {
+    if f2_try_extend_basis(ech_vecs, ech_pivs, col_vecs[j], n) {
+      b_basis.push(col_vecs[j])
+      c_indices.push(j)
+    }
+  }
+  let r = b_basis.length()
+  // 求 Z = ker(d_V) 並擴充 B 為 Z = B ⊕ H
+  let ker_vecs = boolmat_kernel_basis_f2(d_v)
+  let h_basis : Array[@core.Bits] = []
+  for kv in ker_vecs {
+    if f2_try_extend_basis(ech_vecs, ech_pivs, kv, n) {
+      h_basis.push(kv)
+    }
+  }
+  let dim_h = h_basis.length()
+  if dim_h + 2 * r != n {
+    return None
+  }
+  // 組裝基底矩陣 P = [H | B | C]（第 col 欄為對應基底向量）
+  let p_mat = @core.BoolMat::zero(n, n)
+  for t in 0..<dim_h {
+    for row in 0..<n {
+      if h_basis[t].get(row) {
+        p_mat.rows[row].set(t)
+      }
+    }
+  }
+  for k in 0..<r {
+    let col_b = dim_h + k
+    for row in 0..<n {
+      if b_basis[k].get(row) {
+        p_mat.rows[row].set(col_b)
+      }
+    }
+    let col_c = dim_h + r + k
+    p_mat.rows[c_indices[k]].set(col_c)
+  }
+  let q_mat = match boolmat_inverse_f2(p_mat) {
+    Some(inv) => inv
+    None => return None
+  }
+  let d_h = @core.BoolMat::zero(dim_h, dim_h)
+  let inj_i = @core.BoolMat::zero(n, dim_h)
+  for row in 0..<n {
+    for t in 0..<dim_h {
+      if p_mat.get(row, t) {
+        inj_i.rows[row].set(t)
+      }
+    }
+  }
+  let proj_p = @core.BoolMat::zero(dim_h, n)
+  for t in 0..<dim_h {
+    for col in 0..<n {
+      if q_mat.get(t, col) {
+        proj_p.rows[t].set(col)
+      }
+    }
+  }
+  // h(v) = ∑_{k=0..<r} (Q v)_{dim_h + k} · e_{c_indices[k]}
+  let homotopy_h = @core.BoolMat::zero(n, n)
+  for k in 0..<r {
+    let target_row = c_indices[k]
+    let coord_row = dim_h + k
+    homotopy_h.rows[target_row].xor_inplace(q_mat.rows[coord_row])
+  }
+  let sdr = BitParallelSDR::{
+    dim_v: n,
+    dim_h,
+    d_v,
+    d_h,
+    inj_i,
+    proj_p,
+    homotopy_h,
+  }
+  if sdr.verify_axioms() {
+    Some(sdr)
+  } else {
+    None
+  }
+}
+
+///|
+/// 由任意單純複形 `sc : @homotopy.SimplicialComplex`（如偏序集階複形 `q.order_complex(true)`）
+/// 組裝直至維度 `max_dim` 的直和全鏈複形微分矩陣 `d_V`，並自動合成強形變收縮 `BitParallelSDR` 與各階鏈維數列表！
+pub fn BitParallelSDR::from_simplicial_complex(
+  sc : @homotopy.SimplicialComplex,
+  max_dim : Int32,
+) -> (BitParallelSDR, Array[Int32])? {
+  let cc = sc.to_chain()
+  let chain_dims : Array[Int32] = []
+  let offsets : Array[Int32] = []
+  let mut total_n = 0
+  let limit_d = if max_dim < cc.dims.length() - 1 {
+    max_dim
+  } else {
+    cc.dims.length() - 1
+  }
+  for k in 0..<=limit_d {
+    offsets.push(total_n)
+    let cnt = cc.dims[k]
+    chain_dims.push(cnt)
+    total_n = total_n + cnt
+  }
+  let d_v = @core.BoolMat::zero(total_n, total_n)
+  for k in 1..<=limit_d {
+    if chain_dims[k] > 0 && chain_dims[k - 1] > 0 {
+      let cols_k = cc.boundaries[k]
+      let row_off = offsets[k - 1]
+      let col_off = offsets[k]
+      for c in 0..<cols_k.length() {
+        let col_bits = cols_k[c]
+        for r in 0..<chain_dims[k - 1] {
+          if col_bits.get(r) {
+            d_v.rows[row_off + r].set(col_off + c)
+          }
+        }
+      }
+    }
+  }
+  match BitParallelSDR::synthesize_from_differential(d_v) {
+    Some(sdr) => Some((sdr, chain_dims))
+    None => None
+  }
+}
+
 // ---------------- 2. 導出代數幾何：Koszul 導出相交、餘切複形與 Milnor/Tjurina 奇點對偶 ----------------
+
+///|
+/// 顯式 Koszul 導出複形 `K_•(f_1, ..., f_r; A)` 計算結果：
+/// - `chain_dims`：各階鏈空間維數 `dim_{𝔽_p} K_k = d · C(r, k)`；
+/// - `differential_ranks`：各階微分矩陣秩 `rank(∂_k : K_k -> K_{k-1})`；
+/// - `tor_betti`：各階導出同調維數 `β_k = dim_{𝔽_p} H_k(K_•(f; A)) = dim Tor_k(A, A/(f))`；
+/// - `serre_euler_characteristic`：Serre 導出相交歐拉示性數 `χ = ∑_{k=0}^r (-1)^k β_k`；
+/// - `differentials_square_zero`：是否所有相鄰微分均滿足 `∂_{k-1} ∘ ∂_k == 0`。
+pub(all) struct KoszulDerivedComplexResult {
+  chain_dims : Array[Int32]
+  differential_ranks : Array[Int32]
+  tor_betti : Array[Int32]
+  serre_euler_characteristic : Int32
+  differentials_square_zero : Bool
+} derive(Debug, Eq)
+
+///|
+/// 在零成本張量代數 `t_alg : ZeroCostTensorAlg` 上對元素序列 `seq_elems = [f_0, ..., f_{r-1}]`
+/// 顯式構造外代數 Koszul 鏈複形 `K_•(f; A) = A ⊗ ∧^• 𝔽_p^r`，由左乘算子矩陣 `L_{f_i}` 組裝各階邊界矩陣 `∂_k`，
+/// 以高斯消去 `Matrix::rank()` 計算真實的 `Tor_k` Betti 數與 Serre 導出相交歐拉示性數！
+pub fn compute_koszul_tor_betti(
+  t_alg : ZeroCostTensorAlg,
+  seq_elems : Array[Array[Int32]],
+) -> KoszulDerivedComplexResult {
+  let p = t_alg.p
+  let d = t_alg.d
+  let r = seq_elems.length()
+  let left_mats : Array[@linalg.Matrix] = []
+  for f in seq_elems {
+    left_mats.push(t_alg.left_mul_matrix(f))
+  }
+  // 按基數 k ∈ 0..=r 分類 {0, ..., r-1} 的子集遮罩 mask ∈ 0..<(1 << r)
+  let subsets_by_deg : Array[Array[Int32]] = []
+  for _k in 0..<=r {
+    subsets_by_deg.push([])
+  }
+  let total_masks = 1 << r
+  for mask in 0..<total_masks {
+    let mut pop = 0
+    for bit in 0..<r {
+      if ((mask >> bit) & 1) == 1 {
+        pop = pop + 1
+      }
+    }
+    subsets_by_deg[pop].push(mask)
+  }
+  let chain_dims : Array[Int32] = []
+  for k in 0..<=r {
+    chain_dims.push(d * subsets_by_deg[k].length())
+  }
+  let partials : Array[@linalg.Matrix] = []
+  let differential_ranks : Array[Int32] = []
+  for k in 1..<=r {
+    let rows_k = chain_dims[k - 1]
+    let cols_k = chain_dims[k]
+    let dk = @linalg.Matrix::zero(p, rows_k, cols_k)
+    let src_list = subsets_by_deg[k]
+    let dst_list = subsets_by_deg[k - 1]
+    for col_idx in 0..<src_list.length() {
+      let mask = src_list[col_idx]
+      let mut pos = 0
+      for bit in 0..<r {
+        if ((mask >> bit) & 1) == 1 {
+          let sub_mask = mask ^ (1 << bit)
+          let mut row_idx = -1
+          for t in 0..<dst_list.length() {
+            if dst_list[t] == sub_mask {
+              row_idx = t
+              break
+            }
+          }
+          if row_idx >= 0 {
+            let sign = if pos % 2 == 0 { 1 } else { p - 1 }
+            let lf = left_mats[bit]
+            for a_row in 0..<d {
+              for a_col in 0..<d {
+                let val = @num.mul_mod(sign, lf.data[a_row][a_col], p)
+                let cur = dk.data[row_idx * d + a_row][col_idx * d + a_col]
+                dk.data[row_idx * d + a_row][col_idx * d + a_col] = @num.mod_pos(
+                  cur + val,
+                  p,
+                )
+              }
+            }
+          }
+          pos = pos + 1
+        }
+      }
+    }
+    partials.push(dk)
+    differential_ranks.push(dk.rank())
+  }
+  // 驗證 ∂_{k-1} ∘ ∂_k == 0
+  let mut sq_zero = true
+  for k in 1..<partials.length() {
+    let prod = partials[k - 1].mul(partials[k])
+    for i in 0..<prod.rows {
+      for j in 0..<prod.cols {
+        if prod.data[i][j] != 0 {
+          sq_zero = false
+        }
+      }
+    }
+  }
+  let tor_betti : Array[Int32] = []
+  let mut chi = 0
+  for k in 0..<=r {
+    let rk_out = if k >= 1 { differential_ranks[k - 1] } else { 0 }
+    let rk_in = if k < r { differential_ranks[k] } else { 0 }
+    let bk = chain_dims[k] - rk_out - rk_in
+    tor_betti.push(bk)
+    if k % 2 == 0 {
+      chi = chi + bk
+    } else {
+      chi = chi - bk
+    }
+  }
+  KoszulDerivedComplexResult::{
+    chain_dims,
+    differential_ranks,
+    tor_betti,
+    serre_euler_characteristic: chi,
+    differentials_square_zero: sq_zero,
+  }
+}
 
 ///|
 /// 綜合導出相交與奇點形變剖析結構（整合 `alge2/homotopy_dag` 與 `alge3/derived`）：

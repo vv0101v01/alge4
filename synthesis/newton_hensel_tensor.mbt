@@ -504,3 +504,178 @@ pub fn ZeroCostTensorAlg::lagrange_primitive_idempotents(
   }
   Some(idems)
 }
+
+///|
+/// 由多變數多項式理想生成元 `gens ⊂ 𝔽_p[x_1, ..., x_n]` 經 Buchberger 約化 Gröbner 基與 Macaulay 標準單項式基底，
+/// 直接編譯構造多變數零成本結構張量代數 `ZeroCostTensorAlg` 與對應的 `@finite.FinAlg`（整合 `alge/gb`、`alge/quot` 與 `algo/finite`）。
+pub fn ZeroCostTensorAlg::from_groebner_ideal(
+  p : Int32,
+  gens : Array[@poly.Poly],
+) -> (ZeroCostTensorAlg, @finite.FinAlg) {
+  let basis = match @poly.standard_monomials(gens) {
+    Some(b) => b
+    None => abort("ZeroCostTensorAlg::from_groebner_ideal: quotient is not zero-dimensional")
+  }
+  let d = basis.length()
+  let nvar = if d > 0 { basis[0].length() } else { 1 }
+  let b : Array[Array[Int32]] = []
+  for x in basis {
+    b.push(x)
+  }
+  let mut i0 = -1
+  for i in 0..<d {
+    let mut allz = true
+    for k in 0..<b[i].length() {
+      if b[i][k] != 0 {
+        allz = false
+      }
+    }
+    if allz {
+      i0 = i
+    }
+  }
+  if i0 > 0 {
+    let tmp = b[0]
+    b[0] = b[i0]
+    b[i0] = tmp
+  }
+  let basis_exps : Array[Int32] = []
+  for i in 0..<d {
+    for v in 0..<nvar {
+      basis_exps.push(b[i][v])
+    }
+  }
+  let gb = @poly.groebner_basis(gens)
+  let mul_tensor = Array::make(d * d * d, 0)
+  let mult : Array[@linalg.Matrix] = []
+  for i in 0..<d {
+    let mi = @linalg.Matrix::zero(p, d, d)
+    for j in 0..<d {
+      let e : Array[Int32] = []
+      for k in 0..<nvar {
+        e.push(b[i][k] + b[j][k])
+      }
+      let prod = @poly.poly_of_terms(nvar, p, [(1, e)])
+      let red = prod.normal_form(gb)
+      let base_off = (i * d + j) * d
+      for t in red.terms {
+        let mut idx = -1
+        for r in 0..<d {
+          if @linalg.int_arrays_eq(b[r], t.exp) {
+            idx = r
+          }
+        }
+        if idx >= 0 {
+          let cval = @num.mod_pos(t.coeff.val, p)
+          mul_tensor[base_off + idx] = cval
+          mi.data[idx][j] = cval
+        }
+      }
+    }
+    mult.push(mi)
+  }
+  let t_alg = ZeroCostTensorAlg::{ p, d, nvar, basis_exps, mul_tensor }
+  let f_alg = @finite.FinAlg::{ p, dim: d, mult }
+  (t_alg, f_alg)
+}
+
+///|
+/// 構造元素 `a ∈ A` 的左乘線性算子矩陣 `L_a ∈ Mat_{d×d}(𝔽_p)`，滿足 `(L_a · b)_t = (a · b)_t`。
+pub fn ZeroCostTensorAlg::left_mul_matrix(
+  self : ZeroCostTensorAlg,
+  a : Array[Int32],
+) -> @linalg.Matrix {
+  let l_mat = @linalg.Matrix::zero(self.p, self.d, self.d)
+  for j in 0..<self.d {
+    let ej = Array::make(self.d, 0)
+    ej[j] = 1
+    let col = self.mul(a, ej)
+    for t in 0..<self.d {
+      l_mat.data[t][j] = col[t]
+    }
+  }
+  l_mat
+}
+
+///|
+/// 計算元素 `a ∈ A` 的正則表示跡（Regular Trace）`Tr_{A/𝔽_p}(a) = Tr(L_a) mod p`。
+pub fn ZeroCostTensorAlg::trace_element(
+  self : ZeroCostTensorAlg,
+  a : Array[Int32],
+) -> Int32 {
+  let l_mat = self.left_mul_matrix(a)
+  let mut tr = 0
+  for i in 0..<self.d {
+    tr = @num.mod_pos(tr + l_mat.data[i][i], self.p)
+  }
+  tr
+}
+
+///|
+/// 構造代數 `A` 的跡雙線性形式矩陣（Trace Bilinear Form Matrix）`T[i, j] = Tr_{A/𝔽_p}(e_i · e_j) mod p`。
+/// 定理（Dickson 跡判準，整合 `alge/quot` 與 `algo/finite`）：
+///   當 `char(k) = p > d`（或無不可分擴張）時，跡形式 `T` 的核空間 `ker(T)` 恰為冪零根 `Nil(A)`，
+///   且 `rank(T) == d` 當且僅當 `A` 為エタール可分半單代數（Étale Separable Algebra）！
+pub fn ZeroCostTensorAlg::trace_bilinear_matrix(
+  self : ZeroCostTensorAlg,
+) -> @linalg.Matrix {
+  let t_mat = @linalg.Matrix::zero(self.p, self.d, self.d)
+  let basis_traces = Array::make(self.d, 0)
+  for t in 0..<self.d {
+    let et = Array::make(self.d, 0)
+    et[t] = 1
+    basis_traces[t] = self.trace_element(et)
+  }
+  for i in 0..<self.d {
+    for j in 0..<self.d {
+      let cell = (i * self.d + j) * self.d
+      let mut tr_ij = 0
+      for t in 0..<self.d {
+        tr_ij = @num.mod_pos(
+          tr_ij + self.mul_tensor[cell + t] * basis_traces[t],
+          self.p,
+        )
+      }
+      t_mat.data[i][j] = tr_ij
+    }
+  }
+  t_mat
+}
+
+///|
+/// 由 Dickson 跡雙線性形式矩陣 `T` 的核空間直接計算冪零根基底 `Nil(A) = ker(T)`。
+pub fn ZeroCostTensorAlg::dickson_radical_basis(
+  self : ZeroCostTensorAlg,
+) -> Array[Array[Int32]] {
+  self.trace_bilinear_matrix().nullspace()
+}
+
+///|
+/// 判定 `A` 的跡形式是否非退化（`rank(T) == d`），即 `A` 是否為エタール可分半單代數。
+pub fn ZeroCostTensorAlg::is_etale_separable(self : ZeroCostTensorAlg) -> Bool {
+  self.trace_bilinear_matrix().rank() == self.d
+}
+
+///|
+/// 以線性代數聯合核空間計算理想生成元集合 `ideal_gens ⊂ A` 的零化子基底
+/// `Ann_A(J) = ⋂_{g ∈ ideal_gens} ker(L_g)`（當 `J = m` 為極大理想生成元時即底座 `Soc(A)`，整合 `alge/quot::socle_basis` 與 `alge/ga::socle`）。
+pub fn ZeroCostTensorAlg::annihilator_basis(
+  self : ZeroCostTensorAlg,
+  ideal_gens : Array[Array[Int32]],
+) -> Array[Array[Int32]] {
+  let k = ideal_gens.length()
+  if k == 0 {
+    return @linalg.Matrix::zero(self.p, 1, self.d).nullspace()
+  }
+  let stacked = @linalg.Matrix::zero(self.p, k * self.d, self.d)
+  for g_idx in 0..<k {
+    let lg = self.left_mul_matrix(ideal_gens[g_idx])
+    for r in 0..<self.d {
+      for c in 0..<self.d {
+        stacked.data[g_idx * self.d + r][c] = lg.data[r][c]
+      }
+    }
+  }
+  stacked.nullspace()
+}
+

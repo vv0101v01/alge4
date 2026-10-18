@@ -1,5 +1,6 @@
 import {
   "moonbitlang/core/builtin",
+  "moon-algebra" @poly,
   "moon-algebra/num",
   "moon-algebra/linalg",
   "moon-algebra/finite",
@@ -14,6 +15,5 @@ import {
 }
 
 import {
-  "moon-algebra" @poly,
   "moonbitlang/core/quickcheck",
 } for "wbtest"

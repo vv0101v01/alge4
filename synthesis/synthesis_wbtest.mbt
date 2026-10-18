@@ -520,21 +520,43 @@ test "Stage VIII (All-Orders Morphism-Bijection Combinations): 1-to-1 C(5,2)=10,
   assert_eq(rep2.passed_combinations, 10)
   assert_true(rep2.all_verified)
 
-  // 2) 3個1組三元組合（C(5,3) = 10 個三元演算法 + 1 個統攝演算法）
+  // 2) 3個1組三元組合（C(5,3) = 10 個三階段管線演算法 + 1 個統攝演算法）
+  assert_true(bijection_triple_123_cert(alg, pts, unit_elem).verified)
+  assert_true(bijection_triple_124_cert(alg, [0, 1, 0]).verified)
+  assert_true(bijection_triple_125_cert(alg).verified)
+  assert_true(bijection_triple_134_cert(alg, pts, [2, 1, 2], 19).verified)
+  assert_true(bijection_triple_135_cert(3, 2).verified)
+  assert_true(bijection_triple_145_cert(alg, [0, 1, 0]).verified)
+  assert_true(bijection_triple_234_cert(alg, pts, unit_elem, 11).verified)
+  assert_true(bijection_triple_235_cert(5).verified)
+  assert_true(bijection_triple_245_cert(6, [1, 0, 1]).verified)
+  assert_true(bijection_triple_345_cert(alg, pts, unit_elem).verified)
   let rep3 = synthesize_bijection_triples_3way()
   assert_eq(rep3.order_k, 3)
   assert_eq(rep3.total_combinations, 10)
   assert_eq(rep3.passed_combinations, 10)
   assert_true(rep3.all_verified)
 
-  // 3) 4個1組四元組合（C(5,4) = 5 個四元演算法 + 1 個統攝演算法）
+  // 3) 4個1組四元組合（C(5,4) = 5 個四階段管線演算法 + 1 個統攝演算法）
+  assert_true(bijection_quad_1234_cert(alg, pts, unit_elem, 11).verified)
+  assert_true(bijection_quad_1235_cert(alg, pts).verified)
+  assert_true(bijection_quad_1245_cert(alg, [0, 1, 0]).verified)
+  assert_true(bijection_quad_1345_cert(alg, pts, unit_elem).verified)
+  assert_true(bijection_quad_2345_cert(alg, pts, unit_elem).verified)
   let rep4 = synthesize_bijection_quads_4way()
   assert_eq(rep4.order_k, 4)
   assert_eq(rep4.total_combinations, 5)
   assert_eq(rep4.passed_combinations, 5)
   assert_true(rep4.all_verified)
 
-  // 4) 5個1組五元終極大一統演算法（C(5,5) = 1，閉環五邊形合成管線）
+  // 4) 5個1組五元終極閉環五邊形演算法（C(5,5) = 1，含二變數 Gröbner 理想張量代數與自動合成 SDR/Koszul）
+  let pentad_cert = synthesize_bijection_pentad_5way_cert()
+  assert_true(pentad_cert.verified)
+  assert_eq(pentad_cert.hilbert_points_count, 4)
+  assert_eq(pentad_cert.trace_rank, 4)
+  assert_true(pentad_cert.ainf_verified)
+  assert_eq(pentad_cert.koszul_tor_betti, [1, 1])
+  assert_eq(pentad_cert.koszul_euler_chi, 0)
   let rep5 = synthesize_bijection_pentad_5way()
   assert_eq(rep5.order_k, 5)
   assert_eq(rep5.total_combinations, 1)
