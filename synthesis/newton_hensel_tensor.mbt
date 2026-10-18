@@ -258,26 +258,47 @@ pub fn ZeroCostTensorAlg::newton_inv(
     return None
   }
   let a0 = @num.mod_pos(a[0], self.p)
-  if a0 == 0 {
-    return None
+  if a0 != 0 {
+    match @num.invmod(a0, self.p) {
+      Some(inv0) => {
+        let mut b = self.scale(inv0, self.one())
+        let two_one = self.scale(2, self.one())
+        let mut prec = 1
+        while prec < self.d {
+          let ab = self.mul(a, b)
+          let factor = self.sub(two_one, ab)
+          b = self.mul(b, factor)
+          prec = prec * 2
+        }
+        if self.mul(a, b) == self.one() {
+          return Some(b)
+        }
+      }
+      None => ()
+    }
   }
-  let inv0 = match @num.invmod(a0, self.p) {
-    Some(v) => v
-    None => return None
+  // 若代數非局部環（具多個極大理想，使 a - a_0·1 不在 Jacobson 根內），
+  // 由結構張量構造左乘算子 L_a 求解半單初值，再執行 Newton 步精化：
+  let l_mat = @linalg.Matrix::zero(self.p, self.d, self.d)
+  for j in 0..<self.d {
+    let ej = Array::make(self.d, 0)
+    ej[j] = 1
+    let col = self.mul(a, ej)
+    for t in 0..<self.d {
+      l_mat.data[t][j] = col[t]
+    }
   }
-  let mut b = self.scale(inv0, self.one())
-  let two_one = self.scale(2, self.one())
-  let mut prec = 1
-  while prec < self.d {
-    let ab = self.mul(a, b)
-    let factor = self.sub(two_one, ab)
-    b = self.mul(b, factor)
-    prec = prec * 2
-  }
-  if self.mul(a, b) == self.one() {
-    Some(b)
-  } else {
-    None
+  match l_mat.solve(self.one()) {
+    None => None
+    Some(b0) => {
+      let two_one = self.scale(2, self.one())
+      let b1 = self.mul(b0, self.sub(two_one, self.mul(a, b0)))
+      if self.mul(a, b1) == self.one() {
+        Some(b1)
+      } else {
+        None
+      }
+    }
   }
 }
 

@@ -493,6 +493,64 @@ test "Stage VII (Homotopical Algebra, Derived Geometry & 2-Groups): BitParallelS
 }
 
 ///|
+test "Stage VIII (All-Orders Morphism-Bijection Combinations): 1-to-1 C(5,2)=10, 3-tuple C(5,3)=10, 4-tuple C(5,4)=5, and 5-tuple C(5,5)=1" {
+  let (alg, pts) = make_split_etale_f5_alg()
+  let q = ClosureQuantale::from_finalg(alg)
+  let t_alg = ZeroCostTensorAlg::from_finalg(alg)
+  let gens : Array[DihedralGauge] = [
+    DihedralGauge::new(1, 1, 6),
+    DihedralGauge::new(0, -1, 6),
+  ]
+  let unit_elem : Array[Int32] = [1, 0, 1]
+  assert_true(bijection_pair_12_quantale_sheaf(alg))
+  assert_true(bijection_pair_13_quantale_hilbert(alg, pts))
+  assert_true(bijection_pair_14_quantale_adjunction(q, [q.top(), q.bot()], [0, 0, 1]))
+  assert_true(bijection_pair_15_quantale_homotopy(q))
+  assert_true(bijection_pair_23_sheaf_hilbert(t_alg, pts, unit_elem))
+  assert_true(bijection_pair_24_sheaf_adjunction(5))
+  assert_true(bijection_pair_25_sheaf_homotopy(6))
+  assert_true(bijection_pair_34_hilbert_adjunction(t_alg, pts, [2, 1, 2], 17))
+  assert_true(bijection_pair_35_hilbert_homotopy(5, 4))
+  assert_true(bijection_pair_45_adjunction_homotopy(6, gens, [0, 1, 0, 0]))
+
+  // 1) 1對1 兩兩組合（C(5,2) = 10 個 1對1 演算法 + 1 個統攝演算法）
+  let rep2 = synthesize_bijection_pairs_2way()
+  assert_eq(rep2.order_k, 2)
+  assert_eq(rep2.total_combinations, 10)
+  assert_eq(rep2.passed_combinations, 10)
+  assert_true(rep2.all_verified)
+
+  // 2) 3個1組三元組合（C(5,3) = 10 個三元演算法 + 1 個統攝演算法）
+  let rep3 = synthesize_bijection_triples_3way()
+  assert_eq(rep3.order_k, 3)
+  assert_eq(rep3.total_combinations, 10)
+  assert_eq(rep3.passed_combinations, 10)
+  assert_true(rep3.all_verified)
+
+  // 3) 4個1組四元組合（C(5,4) = 5 個四元演算法 + 1 個統攝演算法）
+  let rep4 = synthesize_bijection_quads_4way()
+  assert_eq(rep4.order_k, 4)
+  assert_eq(rep4.total_combinations, 5)
+  assert_eq(rep4.passed_combinations, 5)
+  assert_true(rep4.all_verified)
+
+  // 4) 5個1組五元終極大一統演算法（C(5,5) = 1，閉環五邊形合成管線）
+  let rep5 = synthesize_bijection_pentad_5way()
+  assert_eq(rep5.order_k, 5)
+  assert_eq(rep5.total_combinations, 1)
+  assert_eq(rep5.passed_combinations, 1)
+  assert_true(rep5.all_verified)
+  assert_eq(rep5.invariant_checksum, 526)
+
+  // 5) 全階態雙射合成總管線（10 + 10 + 5 + 1 = 26 個多階態雙射組合全數通過）
+  let all_reps = synthesize_all_bijection_combinations()
+  assert_eq(all_reps.length(), 4)
+  for r in all_reps {
+    assert_true(r.all_verified)
+  }
+}
+
+///|
 test "property: ClosureQuantale satisfies residuated Galois adjunction (a · b ≼ c ⟺ a ≼ (c : b))" {
   @quickcheck.check((seed : Int32) => {
     let s = @num.mod_pos(seed, 10000)

@@ -45,5 +45,22 @@
 - 綜合導出奇點剖析器 `analyze_derived_singularity`（結合 Milnor $\mu$、Tjurina $\tau$、Saito 判準、餘切複形虛擬維度與 Serre 導出相交歐拉示性數 $\chi(\mathrm{Tor}_*^R(A,B))$）；
 - 非交換二面體規範群 `DihedralGauge`、帶權路徑壓縮基本群胚 `PathCompressedGroupoid`、2-群交叉模 `CrossedModule2Cell` 交換律檢驗 `verify_2group_exchange_law`、2D/3D 立方體 Kan 盒子填補 `cubical_hcomp_2d_gauge` / `verify_cubical_kan_fill_3d_gauge` 與 Licata–Shulman 迴路編碼 `hit_bg_encode_word`。
 
-### 6. `synthesis_wbtest.mbt`
-- 涵蓋全部七個階段的白盒斷言測試與伽羅瓦伴隨律 QuickCheck 屬性測試。
+### 6. `bijection_combinations.mbt`（階段 VIII — 五大態雙射 $\mathcal{B}_1,\dots,\mathcal{B}_5$ 之全階組合大一統引擎）
+將五大核心態雙射：
+- $\mathcal{B}_1$：量化格伽羅瓦伴隨與 Topos 模態雙射 $\mathrm{Hom}_{\mathcal{L}}(C \cdot B, A) \cong \mathrm{Hom}_{\mathcal{L}}(C, (A : B))$
+- $\mathcal{B}_2$：偏序景預層極限與單價 Glue 結構雙射 $\mathrm{Hom}_{\mathsf{PSh}}(1, F) \cong \varprojlim F(u)$ 且 $(A \simeq B) \simeq (A =_{\mathcal{U}} B)$
+- $\mathcal{B}_3$：Hilbert 點求值態雙射與冪零 Newton 倍增提升 $\mathrm{Hom}_{k\text{-Alg}}(A, k) \cong V_k(I) \leftrightarrow \{e^{(r)}\}$
+- $\mathcal{B}_4$：自由—遺忘／餘米田／張量—Hom 柯里化／單價骨架對角化雙射 $\mathrm{Hom}_{\mathsf{Mon}}(\mathrm{Free}(\Sigma), M) \cong \mathrm{Hom}_{\mathsf{Set}}(\Sigma, U(M))$
+- $\mathcal{B}_5$：位並行 SDR–HPL–$A_\infty$ 轉移／導出奇點／高維群胚迴路雙射 $\pi_1(\mathbf{B}G, \mathsf{base}) \cong G$
+
+按階數 $k \in \{2, 3, 4, 5\}$ 進行全組合合成（共 $\binom{5}{2} + \binom{5}{3} + \binom{5}{4} + \binom{5}{5} = 10 + 10 + 5 + 1 = 26$ 個合成演算法）：
+- **1對1 兩兩相互組合（$\binom{5}{2} = 10$ 個 1對1 演算法 $+$ 統攝演算法 `synthesize_bijection_pairs_2way`）**：
+  `bijection_pair_12_quantale_sheaf`、`bijection_pair_13_quantale_hilbert`、`bijection_pair_14_quantale_adjunction`、`bijection_pair_15_quantale_homotopy`、`bijection_pair_23_sheaf_hilbert`、`bijection_pair_24_sheaf_adjunction`、`bijection_pair_25_sheaf_homotopy`、`bijection_pair_34_hilbert_adjunction`、`bijection_pair_35_hilbert_homotopy`、`bijection_pair_45_adjunction_homotopy`；
+- **3個1組三元相互組合（$\binom{5}{3} = 10$ 個三元演算法 $+$ 統攝演算法 `synthesize_bijection_triples_3way`）**：
+  `bijection_triple_123`、`bijection_triple_124`、`bijection_triple_125`、`bijection_triple_134`、`bijection_triple_135`、`bijection_triple_145`、`bijection_triple_234`、`bijection_triple_235`、`bijection_triple_245`、`bijection_triple_345`；
+- **4個1組四元相互組合（$\binom{5}{4} = 5$ 個四元演算法 $+$ 統攝演算法 `synthesize_bijection_quads_4way`）**：
+  `bijection_quad_1234`、`bijection_quad_1235`、`bijection_quad_1245`、`bijection_quad_1345`、`bijection_quad_2345`；
+- **5個1組五元終極大一統演算法（$\binom{5}{5} = 1$，`synthesize_bijection_pentad_5way` $+$ 全階總管線 `synthesize_all_bijection_combinations`）**。
+
+### 7. `synthesis_wbtest.mbt`
+- 涵蓋全部八個階段（含 26 個全階態雙射組合）的白盒斷言測試與伽羅瓦伴隨律 QuickCheck 屬性測試。
